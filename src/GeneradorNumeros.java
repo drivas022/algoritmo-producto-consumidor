@@ -40,7 +40,7 @@ public class GeneradorNumeros {
                 }
             }
             
-            System.out.println("Archivo " + nombreArchivo + " generado con éxito");
+            System.out.println("Archivo " + nombreArchivo + " generado con exito");
             
         } catch (IOException e) {
             System.err.println("Error al generar el archivo: " + e.getMessage());

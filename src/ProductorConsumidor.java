@@ -5,6 +5,7 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Hashtable;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
@@ -110,7 +111,7 @@ class Productor implements Runnable {
                         animacion.actualizarEstadisticas("producido", producto.getValor());
                         animacion.actualizarUtilizacionBuffer(buffer.size());
                         
-                        Thread.sleep(500); // Pausa para visualizar
+                        Thread.sleep(animacion.getDelayProductor()); // Usar el delay dinámico
                     } catch (NumberFormatException e) {
                         System.err.println("Error al parsear número: " + numStr);
                     } catch (InterruptedException e) {
@@ -188,7 +189,7 @@ class Consumidor implements Runnable {
                 animacion.actualizarEstadisticas("consumido", producto.getValor());
                 animacion.actualizarUtilizacionBuffer(buffer.size());
                 
-                Thread.sleep(800); // Pausa para visualizar
+                Thread.sleep(animacion.getDelayConsumidor()); // Usar el delay dinámico
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -224,6 +225,12 @@ class Animacion {
     private JButton btnReanudar;
     private JButton btnReiniciar;
     private volatile boolean pausado = false;
+    
+    // Atributos para control de velocidad
+    private JSlider sliderVelocidad;
+    private JLabel lblVelocidad;
+    private volatile int delayProductor = 500;  // valor por defecto en ms
+    private volatile int delayConsumidor = 800; // valor por defecto en ms
     
     // Atributos para estadísticas
     private Map<String, JLabel> estadisticas = new HashMap<>();
@@ -387,7 +394,7 @@ class Animacion {
     }
     
     private void crearPanelControl() {
-        JPanel controlPanel = new JPanel(new GridLayout(3, 1, 5, 10));
+        JPanel controlPanel = new JPanel(new GridLayout(5, 1, 5, 10)); // Aumentado para incluir slider
         controlPanel.setBorder(BorderFactory.createTitledBorder(
             BorderFactory.createLineBorder(new Color(100, 100, 100), 1, true),
             "Control",
@@ -425,9 +432,65 @@ class Animacion {
             }
         });
         
+        // Añadir control de velocidad
+        JPanel velocidadPanel = new JPanel(new BorderLayout(5, 5));
+        lblVelocidad = new JLabel("Velocidad: Normal", SwingConstants.CENTER);
+        lblVelocidad.setFont(fuenteNormal);
+        
+        sliderVelocidad = new JSlider(JSlider.HORIZONTAL, 1, 5, 3);
+        sliderVelocidad.setMajorTickSpacing(1);
+        sliderVelocidad.setPaintTicks(true);
+        sliderVelocidad.setPaintLabels(true);
+        sliderVelocidad.setSnapToTicks(true);
+        
+        // Etiquetas para el slider
+        Hashtable<Integer, JLabel> labelTable = new Hashtable<>();
+        labelTable.put(1, new JLabel("Muy lento"));
+        labelTable.put(2, new JLabel("Lento"));
+        labelTable.put(3, new JLabel("Normal"));
+        labelTable.put(4, new JLabel("Rápido"));
+        labelTable.put(5, new JLabel("Muy rápido"));
+        sliderVelocidad.setLabelTable(labelTable);
+        
+        sliderVelocidad.addChangeListener(e -> {
+            int valor = sliderVelocidad.getValue();
+            switch(valor) {
+                case 1: // Muy lento
+                    delayProductor = 2000;
+                    delayConsumidor = 3000;
+                    lblVelocidad.setText("Velocidad: Muy lenta");
+                    break;
+                case 2: // Lento
+                    delayProductor = 1000;
+                    delayConsumidor = 1500;
+                    lblVelocidad.setText("Velocidad: Lenta");
+                    break;
+                case 3: // Normal
+                    delayProductor = 500;
+                    delayConsumidor = 800;
+                    lblVelocidad.setText("Velocidad: Normal");
+                    break;
+                case 4: // Rápido
+                    delayProductor = 200;
+                    delayConsumidor = 300;
+                    lblVelocidad.setText("Velocidad: Rápida");
+                    break;
+                case 5: // Muy rápido
+                    delayProductor = 50;
+                    delayConsumidor = 100;
+                    lblVelocidad.setText("Velocidad: Muy rápida");
+                    break;
+            }
+        });
+        
+        velocidadPanel.add(lblVelocidad, BorderLayout.NORTH);
+        velocidadPanel.add(sliderVelocidad, BorderLayout.CENTER);
+        
+        // Añadir componentes al panel
         controlPanel.add(btnPausar);
         controlPanel.add(btnReanudar);
         controlPanel.add(btnReiniciar);
+        controlPanel.add(velocidadPanel);
         
         JPanel eastPanel = new JPanel(new BorderLayout());
         eastPanel.add(controlPanel, BorderLayout.NORTH);
@@ -483,6 +546,14 @@ class Animacion {
             wait();
         }
         return false;
+    }
+    
+    public int getDelayProductor() {
+        return delayProductor;
+    }
+
+    public int getDelayConsumidor() {
+        return delayConsumidor;
     }
     
     public void actualizar(String mensaje) {

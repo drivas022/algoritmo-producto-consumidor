@@ -1,0 +1,44 @@
+# Compiled class files
+*.class
+
+# Package Files #
+*.jar
+*.war
+*.ear
+
+# IDE-specific files
+## IntelliJ
+*.iml
+*.ipr
+*.iws
+.idea/
+out/
+
+## Eclipse
+.project
+.classpath
+.settings/
+bin/
+
+## NetBeans
+nbproject/
+build/
+nbbuild/
+dist/
+nbdist/
+*.nb-gradle/
+
+# OS / Editor files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Logs and temp files
+*.log
+*.tmp
+*.bak
+
+# Excluir todos los archivos .txt
+*.txt

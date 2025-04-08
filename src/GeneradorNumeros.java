@@ -6,6 +6,7 @@ import java.util.Random;
 /**
  * Esta clase permite generar un archivo con números aleatorios para probar
  * la aplicación Productor-Consumidor
+ * Versión modificada: un número por línea
  */
 public class GeneradorNumeros {
     public static void main(String[] args) {
@@ -18,7 +19,7 @@ public class GeneradorNumeros {
     }
     
     /**
-     * Genera un archivo de texto con números aleatorios
+     * Genera un archivo de texto con números aleatorios, un número por línea
      * @param nombreArchivo Nombre del archivo a generar
      * @param cantidad Cantidad de números a generar
      * @param min Valor mínimo
@@ -30,14 +31,7 @@ public class GeneradorNumeros {
         try (PrintWriter writer = new PrintWriter(new FileWriter(nombreArchivo))) {
             for (int i = 0; i < cantidad; i++) {
                 int numero = random.nextInt(max - min + 1) + min;
-                writer.print(numero);
-                
-                // Agregar espacio o nueva línea
-                if ((i + 1) % 10 == 0) {
-                    writer.println();
-                } else {
-                    writer.print(" ");
-                }
+                writer.println(numero); // Escribir un número por línea
             }
             
             System.out.println("Archivo " + nombreArchivo + " generado con exito");

@@ -6,16 +6,17 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Hashtable;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.Semaphore;
 import javax.swing.*;
 import javax.swing.border.TitledBorder;
 
 /**
  * Esta clase representa un número con su clasificación
  */
+
 class Producto {
     private int valor;
     private boolean esPar;
@@ -66,15 +67,185 @@ class Producto {
 }
 
 /**
+ * Buffer compartido utilizando una lista enlazada y semáforos para sincronización
+ */
+class BufferCompartido {
+    private final LinkedList<Producto> buffer;
+    private final int capacidad;
+    
+    // Semáforos para control de concurrencia
+    private final Semaphore mutex;     // Controla el acceso a la sección crítica
+    private final Semaphore empty;     // Controla espacios disponibles en el buffer
+    private final Semaphore full;      // Controla elementos disponibles en el buffer
+    
+    // Semáforos adicionales para los tipos específicos de consumidores
+    private final Semaphore semPares;  // Para números pares
+    private final Semaphore semImpares; // Para números impares
+    private final Semaphore semPrimos; // Para números primos
+    
+    public BufferCompartido(int capacidad) {
+        this.capacidad = capacidad;
+        this.buffer = new LinkedList<>();
+        
+        // Inicializar semáforos
+        this.mutex = new Semaphore(1, true); // Semáforo binario (mutex)
+        this.empty = new Semaphore(capacidad, true); // Inicialmente, todos los espacios están vacíos
+        this.full = new Semaphore(0, true); // Inicialmente, no hay elementos
+        
+        // Inicializar semáforos para tipos específicos
+        this.semPares = new Semaphore(0, true);
+        this.semImpares = new Semaphore(0, true);
+        this.semPrimos = new Semaphore(0, true);
+    }
+    
+    /**
+     * Añade un producto al buffer
+     */
+    public void poner(Producto producto) throws InterruptedException {
+        empty.acquire();  // Esperar si no hay espacio disponible
+        mutex.acquire();  // Entrar en la sección crítica
+        
+        try {
+            buffer.add(producto); // Añadir el producto al buffer
+            
+            // Señalizar a los consumidores específicos según el tipo de número
+            if (producto.esPar()) {
+                semPares.release();
+            }
+            if (producto.esImpar()) {
+                semImpares.release();
+            }
+            if (producto.esPrimo()) {
+                semPrimos.release();
+            }
+        } finally {
+            mutex.release();  // Salir de la sección crítica
+            full.release();   // Señalizar que hay un elemento más en el buffer
+        }
+    }
+    
+    /**
+     * Obtiene un producto del buffer según el tipo especificado
+     */
+    public Producto tomar(String tipo) throws InterruptedException {
+        Producto producto = null;
+        
+        // Esperar por el tipo específico de número
+        switch (tipo) {
+            case "par":
+                semPares.acquire();
+                break;
+            case "impar":
+                semImpares.acquire();
+                break;
+            case "primo":
+                semPrimos.acquire();
+                break;
+        }
+        
+        full.acquire();  // Esperar si el buffer está vacío
+        mutex.acquire(); // Entrar en la sección crítica
+        
+        try {
+            // Buscar un producto del tipo correcto
+            int index = -1;
+            for (int i = 0; i < buffer.size(); i++) {
+                Producto p = buffer.get(i);
+                if ((tipo.equals("par") && p.esPar()) ||
+                    (tipo.equals("impar") && p.esImpar()) ||
+                    (tipo.equals("primo") && p.esPrimo())) {
+                    index = i;
+                    break;
+                }
+            }
+            
+            if (index != -1) {
+                producto = buffer.remove(index);
+            }
+        } finally {
+            mutex.release(); // Salir de la sección crítica
+            empty.release(); // Señalizar que hay un espacio más en el buffer
+        }
+        
+        return producto;
+    }
+    
+    /**
+     * Obtiene una copia de los elementos actuales del buffer (para visualización)
+     */
+    public List<Producto> getElementos() {
+        List<Producto> copia = new ArrayList<>();
+        try {
+            mutex.acquire();
+            copia.addAll(buffer);
+            mutex.release();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        return copia;
+    }
+    
+    /**
+     * Devuelve el tamaño actual del buffer
+     */
+    public int getTamano() {
+        try {
+            mutex.acquire();
+            int tamano = buffer.size();
+            mutex.release();
+            return tamano;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return 0;
+        }
+    }
+    
+    /**
+     * Limpia el buffer (usado para reiniciar)
+     */
+    public void limpiar() {
+        try {
+            mutex.acquire();
+            
+            // Vaciar el buffer
+            int tamanoActual = buffer.size();
+            buffer.clear();
+            
+            // Reiniciar los semáforos
+            // Drenar los permisos existentes
+            drainPermits(full);
+            drainPermits(semPares);
+            drainPermits(semImpares);
+            drainPermits(semPrimos);
+            
+            // Reiniciar el semáforo empty
+            drainPermits(empty);
+            empty.release(capacidad);
+            
+            mutex.release();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+    
+    /**
+     * Método auxiliar para drenar todos los permisos de un semáforo
+     */
+    private void drainPermits(Semaphore semaphore) {
+        semaphore.drainPermits();
+    }
+}
+
+/**
  * Clase que representa un productor que lee números de un archivo
  */
 class Productor implements Runnable {
-    private final BlockingQueue<Producto> buffer;
+    private final BufferCompartido buffer;
     private final String archivo;
     private final Animacion animacion;
     private volatile boolean ejecutando = true;
 
-    public Productor(BlockingQueue<Producto> buffer, String archivo, Animacion animacion) {
+    public Productor(BufferCompartido buffer, String archivo, Animacion animacion) {
         this.buffer = buffer;
         this.archivo = archivo;
         this.animacion = animacion;
@@ -103,13 +274,16 @@ class Productor implements Runnable {
                         
                         int num = Integer.parseInt(numStr.trim());
                         Producto producto = new Producto(num);
-                        buffer.put(producto); // BlockingQueue.put() bloqueará si el buffer está lleno
+                        
+                        // Usar el buffer con semáforos para añadir el producto
+                        buffer.poner(producto);
+                        
                         animacion.actualizar("Productor produjo: " + producto.getValor());
-                        animacion.actualizarBuffer(new ArrayList<>(buffer));
+                        animacion.actualizarBuffer(buffer.getElementos());
                         
                         // Actualizar estadísticas
                         animacion.actualizarEstadisticas("producido", producto.getValor());
-                        animacion.actualizarUtilizacionBuffer(buffer.size());
+                        animacion.actualizarUtilizacionBuffer(buffer.getTamano());
                         
                         Thread.sleep(animacion.getDelayProductor()); // Usar el delay dinámico
                     } catch (NumberFormatException e) {
@@ -137,14 +311,14 @@ class Productor implements Runnable {
  * Clase que representa un consumidor que toma números del buffer según su tipo
  */
 class Consumidor implements Runnable {
-    private final BlockingQueue<Producto> buffer;
+    private final BufferCompartido buffer;
     private final String tipo;
     private final int id;
     private final Animacion animacion;
     private volatile boolean ejecutando = true;
     private int suma = 0;
 
-    public Consumidor(BlockingQueue<Producto> buffer, String tipo, int id, Animacion animacion) {
+    public Consumidor(BufferCompartido buffer, String tipo, int id, Animacion animacion) {
         this.buffer = buffer;
         this.tipo = tipo;
         this.id = id;
@@ -155,41 +329,24 @@ class Consumidor implements Runnable {
     public void run() {
         try {
             while (ejecutando) {
-                Producto producto = null;
-                
-                // Buscar un producto adecuado para este consumidor
-                synchronized (buffer) {
-                    for (Producto p : buffer) {
-                        if ((tipo.equals("par") && p.esPar()) ||
-                            (tipo.equals("impar") && p.esImpar()) ||
-                            (tipo.equals("primo") && p.esPrimo())) {
-                            producto = p;
-                            buffer.remove(p);
-                            break;
-                        }
-                    }
-                    
-                    if (producto == null) {
-                        // No hay productos adecuados, esperar
-                        buffer.wait(100);
-                        continue;
-                    }
-                }
-                
-                // Procesar el producto
                 // Verificar si la animación está pausada
                 if (animacion.estaPausado()) continue;
                 
-                suma += producto.getValor();
-                animacion.actualizar("Consumidor " + id + " (" + tipo + ") consumió: " + producto.getValor() + ", Suma: " + suma);
-                animacion.actualizarSuma(id, suma);
-                animacion.actualizarBuffer(new ArrayList<>(buffer));
+                // Tomar un producto del buffer usando semáforos
+                Producto producto = buffer.tomar(tipo);
                 
-                // Actualizar estadísticas
-                animacion.actualizarEstadisticas("consumido", producto.getValor());
-                animacion.actualizarUtilizacionBuffer(buffer.size());
-                
-                Thread.sleep(animacion.getDelayConsumidor()); // Usar el delay dinámico
+                if (producto != null) {
+                    suma += producto.getValor();
+                    animacion.actualizar("Consumidor " + id + " (" + tipo + ") consumió: " + producto.getValor() + ", Suma: " + suma);
+                    animacion.actualizarSuma(id, suma);
+                    animacion.actualizarBuffer(buffer.getElementos());
+                    
+                    // Actualizar estadísticas
+                    animacion.actualizarEstadisticas("consumido", producto.getValor());
+                    animacion.actualizarUtilizacionBuffer(buffer.getTamano());
+                    
+                    Thread.sleep(animacion.getDelayConsumidor()); // Usar el delay dinámico
+                }
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -251,7 +408,7 @@ class Animacion {
             }
             
             // Crear la ventana principal
-            frame = new JFrame("Simulación Productor-Consumidor");
+            frame = new JFrame("Simulación Productor-Consumidor con Semáforos");
             frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
             frame.setSize(1100, 700); // Aumentado tamaño para acomodar panel de control
             frame.setLayout(new BorderLayout(10, 10));
@@ -430,6 +587,15 @@ class Animacion {
             synchronized (this) {
                 this.notifyAll(); // Notificar a todos los hilos que estén esperando
             }
+        });
+        
+        // Botón de reinicio
+        btnReiniciar.addActionListener(e -> {
+            logArea.append("[" + java.time.LocalTime.now().toString().substring(0, 8) + "] Reiniciando simulación...\n");
+            logArea.setCaretPosition(logArea.getDocument().getLength());
+            
+            // La funcionalidad real de reinicio se implementa en la clase principal
+            ProductorConsumidorSemaforos.reiniciarSimulacion();
         });
         
         // Añadir control de velocidad
@@ -688,7 +854,7 @@ class Animacion {
                     
                     // Añadir etiqueta pequeña para indicar el tipo
                     JLabel tipoLabel = new JLabel("", SwingConstants.CENTER);
-                    tipoLabel.setFont(new Font("Arial", Font.PLAIN, 10));
+                    tipoLabel.setFont(new Font("Arial", Font.PLAIN, 10));   
                     
                     if (p.esPrimo()) {
                         tipoLabel.setText("Primo");
@@ -712,9 +878,9 @@ class Animacion {
 /**
  * Clase principal que orquesta todo el sistema
  */
-public class ProductorConsumidor {
+public class ProductorConsumidorSemaforos {
     // Variables de clase para permitir reinicio
-    private static BlockingQueue<Producto> buffer;
+    private static BufferCompartido buffer;
     private static Animacion animacion;
     private static Productor productor;
     private static Thread threadProductor;
@@ -730,7 +896,7 @@ public class ProductorConsumidor {
         numConsumidores = 3; // Múltiplo de 3 como especifica el problema
         
         // Crear buffer compartido
-        buffer = new LinkedBlockingQueue<>(tamanoBuffer);
+        buffer = new BufferCompartido(tamanoBuffer);
         
         // Crear la animación
         animacion = new Animacion(numConsumidores);
@@ -781,7 +947,7 @@ public class ProductorConsumidor {
         }));
     }
     
-    private static void reiniciarSimulacion() {
+    public static void reiniciarSimulacion() {
         // Este método sería llamado por el botón de reinicio
         // Detener hilos actuales
         productor.detener();
@@ -797,7 +963,7 @@ public class ProductorConsumidor {
             }
             
             // Limpiar buffer
-            buffer.clear();
+            buffer.limpiar();
             
             // Crear nuevos hilos
             productor = new Productor(buffer, archivoNumeros, animacion);
